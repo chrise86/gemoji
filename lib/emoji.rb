@@ -25,6 +25,10 @@ module Emoji
     inverted_mapping[unicode]
   end
 
+  def regex
+    /(#{inverted_mapping.keys.join('|')})/
+  end
+
   private
     def mapping
       @mapping ||= {}.tap do |mapping|
