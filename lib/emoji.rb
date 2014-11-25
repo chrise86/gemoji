@@ -56,7 +56,7 @@ module Emoji
   end
 
   def regex
-    /(#{inverted_mapping.keys.join('|')})/
+    /(#{unicodes_index.keys.join('|')})/
   end
 
   private
