@@ -1,28 +1,58 @@
+require 'emoji/character'
+require 'json'
+
 module Emoji
   extend self
+
+  def data_file
+    File.expand_path('../../db/emoji.json', __FILE__)
+  end
 
   def images_path
     File.expand_path("../../images", __FILE__)
   end
 
-  def names
-    @names ||= mapping.keys.sort
+  def all
+    return @all if defined? @all
+    @all = []
+    parse_data_file
+    @all
   end
 
-  def unicodes
-    @unicodes ||= inverted_mapping.keys
+  # Public: Initialize an Emoji::Character instance and yield it to the block.
+  # The character is added to the `Emoji.all` set.
+  def create(name)
+    emoji = Emoji::Character.new(name)
+    self.all << edit_emoji(emoji) { yield emoji if block_given? }
+    emoji
   end
 
-  def custom
-    @custom ||= mapping.select { |name, unicode| unicode.nil? }.keys.sort
+  # Public: Yield an emoji to the block and update the indices in case its
+  # aliases or unicode_aliases lists changed.
+  def edit_emoji(emoji)
+    @names_index ||= Hash.new
+    @unicodes_index ||= Hash.new
+
+    yield emoji
+
+    emoji.aliases.each do |name|
+      @names_index[name] = emoji
+    end
+    emoji.unicode_aliases.each do |unicode|
+      @unicodes_index[unicode] = emoji
+    end
+
+    emoji
   end
 
-  def unicode_for(name)
-    Array(mapping[name]).last
+  # Public: Find an emoji by its aliased name. Return nil if missing.
+  def find_by_alias(name)
+    names_index[name]
   end
 
-  def name_for(unicode)
-    inverted_mapping[unicode]
+  # Public: Find an emoji by its unicode character. Return nil if missing.
+  def find_by_unicode(unicode)
+    unicodes_index[unicode]
   end
 
   def regex
@@ -30,42 +60,29 @@ module Emoji
   end
 
   private
-    def mapping
-      @mapping ||= {}.tap do |mapping|
-        emoji_path = "#{images_path}/emoji"
+    VARIATION_SELECTOR_16 = "\u{fe0f}".freeze
 
-        Dir["#{emoji_path}/*.png"].each do |filename|
-          name = File.basename(filename, ".png")
-
-          if File.symlink?(filename)
-            unicode_filename = "#{emoji_path}/#{File.readlink(filename)}"
-            mapping[name] = []
-
-            loop do
-              codepoints = unicode_filename.match(/unicode\/([\da-f\-]+)\.png/)[1]
-              mapping[name] << codepoints.split("-").map(&:hex).pack("U*")
-
-              if File.symlink?(unicode_filename)
-                unicode_filename = "#{emoji_path}/unicode/#{File.readlink(unicode_filename)}"
-              else
-                break
-              end
-            end
-          else
-            mapping[name] = nil
+    def parse_data_file
+      raw = File.open(data_file, 'r:UTF-8') { |data| JSON.parse(data.read) }
+      raw.each do |raw_emoji|
+        self.create(nil) do |emoji|
+          raw_emoji.fetch('aliases').each { |name| emoji.add_alias(name) }
+          if raw = raw_emoji['emoji']
+            unicodes = [raw, raw.sub(VARIATION_SELECTOR_16, '') + VARIATION_SELECTOR_16].uniq
+            unicodes.each { |uni| emoji.add_unicode_alias(uni) }
           end
+          raw_emoji.fetch('tags').each { |tag| emoji.add_tag(tag) }
         end
       end
     end
 
-    def inverted_mapping
-      @inverted_mapping ||= {}.tap do |inverted_mapping|
-        mapping.each do |name, unicodes|
-          next if unicodes.nil?
-          unicodes.each do |unicode|
-            inverted_mapping[unicode] = name
-          end
-        end
-      end
+    def names_index
+      all unless defined? @all
+      @names_index
+    end
+
+    def unicodes_index
+      all unless defined? @all
+      @unicodes_index
     end
 end
